@@ -1,0 +1,52 @@
+---
+name: Run jobs on modified directories
+
+on:
+  push:
+
+jobs:
+  create-matrix-job:
+    name: Create matrix
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine if there are images to build
+        id: check-images
+        run: |
+          if [[ "$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" -- "images/")" ]]
+          then
+            echo "build_images=true" | tee -a "$GITHUB_ENV" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "build_images=false" | tee -a "$GITHUB_ENV" | tee -a "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create matrix for changed directories
+        id: create-matrix
+        if: env.build_images == 'true'
+        run: |
+          echo "matrix=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" -- "images/" | \
+            cut -d '/' -f1,2 | \
+            sort -u | \
+            jq -cnR '[inputs]')" | tee -a "$GITHUB_OUTPUT"
+
+    outputs:
+      matrix: ${{ steps.create-matrix.outputs.matrix }}
+      build_images: ${{ steps.check-images.outputs.build_images }}
+
+  build-images-job:
+    name: Build images
+    if: needs.create-matrix-job.outputs.build_images == 'true'
+    needs: create-matrix-job
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        directory: ${{ fromJSON(needs.create-matrix-job.outputs.matrix) }}
+
+    steps:
+      - name: Build image
+        run: echo "Building image for ${{ matrix.directory }}"
